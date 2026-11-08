@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QR الجروب</title>
+<style>
+  :root{--blue:#1459a8;--ink:#12263f;--line:#d6e2f1;--bg:#f5f9fe}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;padding:16px}
+  h1{font-size:20px;margin:0;font-weight:700}
+  #qr{padding:16px;background:#fff;border:1px solid var(--line);border-radius:10px;display:none}
+  #bar{width:280px;height:8px;background:var(--line);border-radius:4px;overflow:hidden;display:none}
+  #fill{height:100%;background:var(--blue);width:100%}
+  #hint{font-size:15px;color:#41597a;margin:0;text-align:center}
+  button{padding:12px 28px;font-size:17px;background:var(--blue);color:#fff;border:0;border-radius:8px;font-family:inherit}
+  #err{color:#b3261e;font-size:14px;max-width:320px;text-align:center}
+</style>
+</head>
+<body>
+<h1>امسح الكود للانضمام لجروب المحاضرة</h1>
+<button id="login">تسجيل دخول (مرة واحدة)</button>
+<div id="qr"></div>
+<div id="bar"><div id="fill"></div></div>
+<p id="hint">الكود بيتغير كل 30 ثانية</p>
+<div id="err"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getDatabase, ref, set, remove }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+// ====== عدّل الجزء ده بس ======
+const firebaseConfig = {
+  apiKey: "AIzaSyCeR0xCg-mMewhMOMacxWGBB_Zfibl-rFk",
+  authDomain: "lecture-qr.firebaseapp.com",
+  databaseURL: "https://lecture-qr-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "lecture-qr",
+  appId: "1:862364138105:web:9bbff5eccc12827c0932a8"
+};
+const WA_LINK  = "https://chat.whatsapp.com/Dz88eW1e3TnJfPQ4QET7gZ";
+const JOIN_URL = "https://novao7.github.io/lecture-qr/join.html";
+// ==============================
+
+const PERIOD = 30;   // ثواني بين كل كود والتاني
+const GRACE  = 15;   // سماح لو حد اتأخر في المسح
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getDatabase(app);
+
+const qrBox = document.getElementById("qr");
+const qr = new QRCode(qrBox, { width: 280, height: 280, correctLevel: QRCode.CorrectLevel.M });
+const fill = document.getElementById("fill");
+const errBox = document.getElementById("err");
+const history = [];
+let barTimer = null;
+
+document.getElementById("login").onclick = async () => {
+  try { await signInWithPopup(auth, new GoogleAuthProvider()); }
+  catch (e) { errBox.textContent = "فشل تسجيل الدخول: " + e.code; }
+};
+
+function randomToken() {
+  const a = new Uint8Array(16);
+  crypto.getRandomValues(a);
+  return [...a].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function rotate() {
+  try {
+    const t = randomToken();
+    await set(ref(db, "tokens/" + t), {
+      link: WA_LINK,
+      expiresAt: Date.now() + (PERIOD + GRACE) * 1000
+    });
+    qr.clear();
+    qr.makeCode(`${JOIN_URL}?t=${t}`);
+    errBox.textContent = "";
+
+    history.push(t);
+    if (history.length > 3) remove(ref(db, "tokens/" + history.shift())).catch(() => {});
+
+    clearInterval(barTimer);
+    const start = Date.now();
+    barTimer = setInterval(() => {
+      const left = Math.max(0, 1 - (Date.now() - start) / (PERIOD * 1000));
+      fill.style.width = (left * 100) + "%";
+    }, 250);
+  } catch (e) {
+    errBox.textContent = "مشكلة في التحديث: " + (e.code || e.message);
+  }
+}
+
+let started = false;
+onAuthStateChanged(auth, user => {
+  if (!user || started) return;
+  started = true;
+  document.getElementById("login").style.display = "none";
+  qrBox.style.display = "block";
+  document.getElementById("bar").style.display = "block";
+  rotate();
+  setInterval(rotate, PERIOD * 1000);
+});
+
+// منع الشاشة من الانطفاء
+let wakeLock = null;
+async function keepAwake() {
+  try { wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") keepAwake();
+});
+keepAwake();
+</script>
+</body>
+</html>
